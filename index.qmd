@@ -1,0 +1,828 @@
+---
+title: "EVALUACIÓN ESTADÍSTICA"
+subtitle: EDUCACIÓN FÍSICA
+date: today
+author:
+  - name: José Alejandro Cepeda Garcia<br>Brian Stiven Boton Avila<br>Harold Stiven Lozano Aguiar<br>Juan Esteban Tafur Fierro
+    affiliation: "Universidad del Tolima"
+    affiliation-url: "https://www.ut.edu.co/"
+lang: es
+title-block-banner: "#243B53"
+format:
+  html:
+    page-layout: full
+    fontsize: 13pt
+    toc: true
+    toc-location: right
+    number-sections: true
+    code-fold: true
+    code-summary: "Ver desarrollo en R"
+    html-math-method: katex
+    smooth-scroll: true
+    theme: "cosmo"
+    highlight-style: "nord"
+    code-overflow: "scroll"
+    background-color: "#F7FAFC"
+    color: "#102A43"
+    link-color: "#486581"
+    heading-color: "#243B53"
+editor: visual
+knitr:
+  opts_chunk:
+    message: false
+    warning: false
+    fig.align: "center"
+    fig.width: 7.4
+    fig.height: 5.1
+    out.width: "84%"
+---
+
+```{=html}
+<div style="position: absolute; top: 16px; right: 20px;">
+  <img src="Logo_ut.png"
+       alt="Logo institucional"
+       style="width: 118px; height: auto; border-radius: 50%; box-shadow: 0 4px 16px rgba(0,0,0,.18);"
+       onerror="this.style.display='none';">
+</div>
+```
+
+```{=html}
+<style>
+.quarto-title-banner,
+.quarto-title-banner h1,
+.quarto-title-banner .title,
+.quarto-title-banner .subtitle,
+.quarto-title-banner .quarto-title-meta {
+  color: #ffffff !important;
+}
+
+body {
+  text-align: justify;
+  line-height: 1.62;
+}
+
+h1 {
+  border-bottom: 2px solid #9FB3C8;
+  padding-bottom: 8px;
+  margin-top: 36px;
+}
+
+h2 {
+  color: #334E68;
+}
+
+h3 {
+  color: #486581;
+}
+
+table {
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.callout {
+  border-radius: 16px;
+}
+
+.panel-tabset {
+  margin-top: 18px;
+}
+</style>
+```
+
+# Panorama general
+
+::: callout-note
+## Alcance del documento
+
+Este informe desarrolla un estudio descriptivo sobre información asociada a la educación física. El análisis se organiza en seis bloques: caracterización de estudiantes, hábitos deportivos, tiempo de reacción, rendimiento físico, resistencia, lesiones y duración aeróbica.
+
+En lugar de presentar solamente cálculos aislados, cada bloque incluye una tabla resumen, un gráfico y una lectura breve del resultado.
+:::
+
+# Preparación técnica
+
+```{r}
+usar_librerias <- function(pkgs) {
+  options(repos = c(CRAN = "https://cloud.r-project.org"))
+
+  no_instaladas <- pkgs[!pkgs %in% rownames(installed.packages())]
+
+  if (length(no_instaladas) > 0) {
+    install.packages(no_instaladas, dependencies = TRUE)
+  }
+
+  for (pkg in pkgs) {
+    suppressPackageStartupMessages(
+      library(pkg, character.only = TRUE)
+    )
+  }
+}
+
+usar_librerias(c(
+  "tidyverse",
+  "readxl",
+  "kableExtra",
+  "janitor",
+  "scales"
+))
+```
+
+# Importación y organización de bases
+
+```{r}
+ruta_archivo <- "datos_evaluacion2.xlsx"
+
+diccionario_hojas <- list(
+  perfil      = "P1_Estudiantes",
+  simetria    = "P2_Distribucion",
+  reaccion    = "P3_Reaccion",
+  resistencia = "P4_Resistencia",
+  habitos     = "P5_Habitos",
+  lesiones    = "P6_Lesiones",
+  aerobico    = "P7_Aerobicos"
+)
+
+leer_excel <- function(nombre_hoja) {
+  readxl::read_excel(ruta_archivo, sheet = nombre_hoja, skip = 1)
+}
+
+bd <- purrr::map(diccionario_hojas, leer_excel)
+
+perfil_estudiantil <- bd$perfil
+rendimiento_simetrico <- bd$simetria
+tiempo_reaccion <- bd$reaccion
+resistencia_grupos <- bd$resistencia
+habitos_deportivos <- bd$habitos
+registro_lesiones <- bd$lesiones
+duracion_aerobica <- bd$aerobico
+```
+
+## Revisión de estructura
+
+::: panel-tabset
+## Perfil
+
+```{r}
+glimpse(perfil_estudiantil)
+```
+
+## Reacción
+
+```{r}
+glimpse(tiempo_reaccion)
+```
+
+## Resistencia
+
+```{r}
+glimpse(resistencia_grupos)
+```
+
+## Aeróbicos
+
+```{r}
+glimpse(duracion_aerobica)
+```
+:::
+
+# Funciones auxiliares
+
+```{r}
+porc <- function(x, dec = 1) {
+  paste0(round(x, dec), "%")
+}
+
+tabla_formateada <- function(x, encabezados = NULL, color = "#243B53") {
+  tabla <- x
+
+  if (!is.null(encabezados)) {
+    names(tabla) <- encabezados
+  }
+
+  tabla %>%
+    knitr::kable(align = "c") %>%
+    kableExtra::kable_styling(
+      full_width = FALSE,
+      bootstrap_options = c("striped", "hover", "condensed", "responsive")
+    ) %>%
+    kableExtra::row_spec(0, bold = TRUE, color = "white", background = color)
+}
+
+frecuencias_ordenadas <- function(datos, variable) {
+  datos %>%
+    count({{ variable }}, name = "fi") %>%
+    arrange({{ variable }}) %>%
+    mutate(
+      hi = fi / sum(fi),
+      porcentaje = 100 * hi,
+      Fi = cumsum(fi),
+      Hi = cumsum(hi)
+    )
+}
+
+percentil_lineal <- function(vector, p) {
+  valores <- sort(vector)
+  n <- length(valores)
+  pos <- (p / 100) * (n + 1)
+  entero <- floor(pos)
+  decimal <- pos - entero
+
+  if (entero < 1) return(valores[1])
+  if (entero >= n) return(valores[n])
+
+  valores[entero] + decimal * (valores[entero + 1] - valores[entero])
+}
+
+percentil_por_clase <- function(tabla, p,
+                                f = "Cantidad_estudiantes",
+                                acumulada = "Frecuencia_acumulada",
+                                inferior = "Limite_inferior",
+                                superior = "Limite_superior") {
+  total <- sum(tabla[[f]])
+  objetivo <- p / 100 * total
+  fila <- which(tabla[[acumulada]] >= objetivo)[1]
+
+  acumulada_anterior <- ifelse(
+    fila == 1,
+    0,
+    tabla[[acumulada]][fila - 1]
+  )
+
+  L <- tabla[[inferior]][fila]
+  fi <- tabla[[f]][fila]
+  amplitud <- tabla[[superior]][fila] - tabla[[inferior]][fila]
+
+  L + ((objetivo - acumulada_anterior) / fi) * amplitud
+}
+
+resumen_clases <- function(tabla, columna) {
+  trabajo <- tabla %>%
+    mutate(
+      fi = .data[[columna]],
+      Fi = cumsum(fi)
+    )
+
+  total <- sum(trabajo$fi)
+  amplitud <- trabajo$limite_superior[1] - trabajo$limite_inferior[1]
+  media <- sum(trabajo$marca * trabajo$fi) / total
+
+  posicion_mediana <- total / 2
+  clase_mediana <- which(trabajo$Fi >= posicion_mediana)[1]
+  Fi_previa <- ifelse(clase_mediana == 1, 0, trabajo$Fi[clase_mediana - 1])
+
+  mediana <- trabajo$limite_inferior[clase_mediana] +
+    ((posicion_mediana - Fi_previa) / trabajo$fi[clase_mediana]) * amplitud
+
+  clase_modal <- which.max(trabajo$fi)
+  f_modal <- trabajo$fi[clase_modal]
+  f_anterior <- ifelse(clase_modal == 1, 0, trabajo$fi[clase_modal - 1])
+  f_siguiente <- ifelse(clase_modal == nrow(trabajo), 0, trabajo$fi[clase_modal + 1])
+
+  moda <- trabajo$limite_inferior[clase_modal] +
+    ((f_modal - f_anterior) /
+       ((f_modal - f_anterior) + (f_modal - f_siguiente))) * amplitud
+
+  varianza <- sum(trabajo$fi * (trabajo$marca - media)^2) / total
+  desviacion <- sqrt(varianza)
+  cv <- desviacion / media * 100
+
+  tibble(
+    media = media,
+    mediana = mediana,
+    moda = moda,
+    varianza = varianza,
+    desviacion = desviacion,
+    coef_variacion = cv
+  )
+}
+```
+
+# 1. Caracterización del grupo
+
+## Clasificación de variables
+
+| Variable               | Naturaleza            | Escala  |
+|------------------------|-----------------------|---------|
+| Sexo                   | Cualitativa nominal   | Nominal |
+| Edad                   | Cuantitativa discreta | Razón   |
+| Horas de entrenamiento | Cuantitativa continua | Razón   |
+| Nivel físico           | Cualitativa ordinal   | Ordinal |
+
+## Datos iniciales
+
+```{r}
+perfil_estudiantil %>%
+  tabla_formateada(
+    c("Estudiante", "Sexo", "Edad", "Horas de entrenamiento", "Nivel físico")
+  )
+```
+
+## Entrenamiento semanal según sexo
+
+```{r}
+comparativo_sexo <- perfil_estudiantil %>%
+  group_by(Sexo) %>%
+  summarise(
+    registros = n(),
+    promedio = mean(Horas_entrenamiento),
+    desviacion = sd(Horas_entrenamiento),
+    rango = max(Horas_entrenamiento) - min(Horas_entrenamiento),
+    minimo = min(Horas_entrenamiento),
+    maximo = max(Horas_entrenamiento),
+    cv = desviacion / promedio * 100,
+    .groups = "drop"
+  )
+
+comparativo_sexo %>%
+  mutate(across(where(is.numeric), ~ round(.x, 2))) %>%
+  tabla_formateada(
+    c("Sexo", "n", "Media", "Desv.", "Rango", "Mín.", "Máx.", "CV (%)")
+  )
+```
+
+```{r}
+ggplot(perfil_estudiantil, aes(x = Sexo, y = Horas_entrenamiento)) +
+  geom_point(
+    aes(shape = Sexo),
+    size = 3,
+    alpha = 0.75,
+    position = position_jitter(width = 0.08, height = 0)
+  ) +
+  stat_summary(fun = mean, geom = "crossbar", width = 0.45, color = "#243B53", linewidth = 0.6) +
+  labs(
+    title = "Horas de entrenamiento por sexo",
+    subtitle = "Puntos individuales y línea de promedio",
+    x = "Sexo",
+    y = "Horas semanales"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "none")
+```
+
+::: callout-tip
+## Lectura
+
+El promedio de horas de entrenamiento es mayor en el grupo masculino. Para comparar la regularidad entre grupos se observa el coeficiente de variación. El grupo con menor CV presenta valores más concentrados respecto a su promedio.
+:::
+
+# 2. Hábitos deportivos
+
+## Días semanales de actividad física
+
+```{r}
+tabla_dias <- frecuencias_ordenadas(habitos_deportivos, Dias_actividad_fisica)
+
+tabla_dias %>%
+  mutate(
+    hi = round(hi, 3),
+    porcentaje = porc(porcentaje),
+    Hi = round(Hi, 3)
+  ) %>%
+  tabla_formateada(c("Días", "fi", "hi", "%", "Fi", "Hi"))
+```
+
+```{r}
+ggplot(tabla_dias, aes(x = factor(Dias_actividad_fisica), y = porcentaje)) +
+  geom_col(fill = "#BCCCDC", color = "#243B53", width = 0.62) +
+  geom_text(aes(label = porc(porcentaje)), vjust = -0.4, size = 3.4) +
+  labs(
+    title = "Distribución de días de actividad física",
+    x = "Días por semana",
+    y = "Porcentaje"
+  ) +
+  theme_light(base_size = 12)
+```
+
+## Número de deportes practicados
+
+```{r}
+tabla_deportes <- frecuencias_ordenadas(habitos_deportivos, Numero_deportes)
+
+tabla_deportes %>%
+  mutate(
+    hi = round(hi, 3),
+    porcentaje = porc(porcentaje),
+    Hi = round(Hi, 3)
+  ) %>%
+  tabla_formateada(c("Deportes", "fi", "hi", "%", "Fi", "Hi"))
+```
+
+```{r}
+ggplot(tabla_deportes, aes(x = Numero_deportes, y = porcentaje)) +
+  geom_segment(aes(xend = Numero_deportes, y = 0, yend = porcentaje), linewidth = 1.2, color = "#627D98") +
+  geom_point(size = 4, color = "#102A43") +
+  geom_text(aes(label = porc(porcentaje)), vjust = -0.75, size = 3.4) +
+  labs(
+    title = "Número de deportes practicados",
+    x = "Cantidad de deportes",
+    y = "Porcentaje"
+  ) +
+  theme_minimal(base_size = 12)
+```
+
+## Medidas resumen de hábitos
+
+```{r}
+resumen_habitos <- habitos_deportivos %>%
+  summarise(
+    media_dias = mean(Dias_actividad_fisica),
+    media_deportes = mean(Numero_deportes),
+    p45_dias = percentil_lineal(Dias_actividad_fisica, 45),
+    p55_deportes = percentil_lineal(Numero_deportes, 55)
+  )
+
+resumen_habitos %>%
+  mutate(across(everything(), ~ round(.x, 2))) %>%
+  tabla_formateada(c("Media días", "Media deportes", "P45 días", "P55 deportes"))
+```
+
+La práctica física promedio se aproxima a cuatro días por semana, mientras que la cantidad media de deportes practicados se acerca a dos.
+
+# 3. Tiempo de reacción
+
+## Tabla de frecuencias
+
+```{r}
+reaccion_resumen <- tiempo_reaccion %>%
+  mutate(
+    total = sum(Cantidad_estudiantes),
+    hi = Cantidad_estudiantes / total,
+    porcentaje = hi * 100,
+    Hi = Frecuencia_acumulada / total,
+    intervalo_limpio = ifelse(
+      row_number() == n(),
+      paste0("[", stringr::str_replace(Intervalo, "-", ", "), "]"),
+      paste0("[", stringr::str_replace(Intervalo, "-", ", "), ")")
+    )
+  )
+
+reaccion_resumen %>%
+  select(intervalo_limpio, Marca_clase, Cantidad_estudiantes, hi, porcentaje, Frecuencia_acumulada, Hi) %>%
+  mutate(
+    hi = round(hi, 3),
+    porcentaje = porc(porcentaje),
+    Hi = round(Hi, 3)
+  ) %>%
+  tabla_formateada(c("Intervalo", "Marca", "fi", "hi", "%", "Fi", "Hi"))
+```
+
+## Indicadores solicitados
+
+```{r}
+pct_08 <- reaccion_resumen %>%
+  filter(Limite_superior <= 0.8) %>%
+  summarise(valor = sum(Cantidad_estudiantes) / sum(reaccion_resumen$Cantidad_estudiantes) * 100) %>%
+  pull(valor)
+
+p84_reaccion <- percentil_por_clase(reaccion_resumen, 84)
+mediana_reaccion <- percentil_por_clase(reaccion_resumen, 50)
+p75_reaccion <- percentil_por_clase(reaccion_resumen, 75)
+
+tibble(
+  medida = c("Tiempo máximo de 0.8 segundos", "Percentil 84", "Mediana", "Percentil 75"),
+  valor = c(pct_08, p84_reaccion, mediana_reaccion, p75_reaccion)
+) %>%
+  mutate(valor = round(valor, 2)) %>%
+  tabla_formateada(c("Indicador", "Resultado"))
+```
+
+```{r}
+ggplot(reaccion_resumen, aes(x = Limite_superior, y = Hi)) +
+  geom_step(linewidth = 1.1, color = "#243B53") +
+  geom_point(size = 3.2, color = "#627D98") +
+  geom_hline(yintercept = c(0.50, 0.75), linetype = "dashed", color = "#D64545") +
+  geom_vline(xintercept = c(mediana_reaccion, p75_reaccion), linetype = "dotted", color = "#D64545") +
+  scale_y_continuous(labels = scales::percent) +
+  labs(
+    title = "Curva acumulada del tiempo de reacción",
+    x = "Tiempo de reacción",
+    y = "Frecuencia relativa acumulada"
+  ) +
+  theme_classic(base_size = 12)
+```
+
+::: callout-note
+## Lectura
+
+El 56% de los estudiantes se encuentra en tiempos de reacción de hasta 0.8 segundos. La mediana está alrededor de 0.75 segundos y el percentil 75 cerca de 1.01 segundos.
+:::
+
+# 4. Rendimiento físico con simetría
+
+## Planteamiento
+
+La distribución tiene siete intervalos de igual amplitud. Como es simétrica, las frecuencias opuestas son equivalentes:
+
+$$n_1=n_7,\qquad n_2=n_6,\qquad n_3=n_5$$
+
+Además, se conoce que $H_6=0.95$. Esto significa que el último intervalo representa el 5% del total. Como $n_7=10$:
+
+$$10=0.05N \Rightarrow N=200$$
+
+Luego, usando $h_3=0.20$:
+
+$$n_3=0.20(200)=40$$
+
+Y como $n_2+n_5=48$, con $n_5=40$:
+
+$$n_2=8$$
+
+Por simetría, $n_6=8$ y $n_7=10$.
+
+## Tabla y gráfico
+
+::: panel-tabset
+## Tabla
+
+```{r}
+rendimiento_simetrico %>%
+  mutate(
+    intervalo_limpio = ifelse(
+      row_number() == n(),
+      paste0("[", stringr::str_replace(Intervalo, "-", ", "), "]"),
+      paste0("[", stringr::str_replace(Intervalo, "-", ", "), ")")
+    ),
+    hi = round(hi, 3),
+    Hi = round(Hi, 3),
+    Porcentaje = porc(Porcentaje)
+  ) %>%
+  select(intervalo_limpio, Marca_clase_Yi, ni, hi, Ni, Hi, Porcentaje) %>%
+  tabla_formateada(c("Intervalo", "Marca", "ni", "hi", "Ni", "Hi", "%"))
+```
+
+## Polígono
+
+```{r}
+ggplot(rendimiento_simetrico, aes(x = Marca_clase_Yi, y = ni)) +
+  geom_area(fill = "#D9E2EC", alpha = 0.65) +
+  geom_line(color = "#243B53", linewidth = 1.15) +
+  geom_point(color = "#102A43", size = 3.6) +
+  geom_text(aes(label = ni), vjust = -0.7, size = 3.4) +
+  labs(
+    title = "Polígono de frecuencias del rendimiento físico",
+    x = "Marca de clase",
+    y = "Frecuencia absoluta"
+  ) +
+  theme_light(base_size = 12)
+```
+
+## Interpretación
+
+La mayor frecuencia se ubica en la clase central y los valores de los extremos se compensan entre sí. Por eso, la tabla conserva el comportamiento simétrico esperado.
+:::
+
+# 5. Comparación de resistencia
+
+## Organización de intervalos
+
+```{r}
+resistencia_lista <- resistencia_grupos %>%
+  janitor::clean_names() %>%
+  mutate(
+    intervalo_limpio = ifelse(
+      row_number() == n(),
+      paste0("[", stringr::str_replace_all(intervalo, "\\s*[–-]\\s*", ", "), "]"),
+      paste0("[", stringr::str_replace_all(intervalo, "\\s*[–-]\\s*", ", "), ")")
+    ),
+    marca = (limite_inferior + limite_superior) / 2
+  )
+
+resistencia_lista %>%
+  select(intervalo_limpio, marca, grupo_a, grupo_b) %>%
+  tabla_formateada(c("Intervalo", "Marca", "Grupo A", "Grupo B"))
+```
+
+## Estadísticos por grupo
+
+```{r}
+medidas_resistencia <- bind_rows(
+  resumen_clases(resistencia_lista, "grupo_a") %>% mutate(grupo = "Grupo A"),
+  resumen_clases(resistencia_lista, "grupo_b") %>% mutate(grupo = "Grupo B")
+) %>%
+  select(grupo, media, mediana, moda, varianza, desviacion, coef_variacion)
+
+medidas_resistencia %>%
+  mutate(across(where(is.numeric), ~ round(.x, 2))) %>%
+  tabla_formateada(
+    c("Grupo", "Media", "Mediana", "Moda", "Varianza", "Desv.", "CV (%)")
+  )
+```
+
+```{r}
+resistencia_larga <- resistencia_lista %>%
+  select(intervalo_limpio, grupo_a, grupo_b) %>%
+  pivot_longer(
+    cols = c(grupo_a, grupo_b),
+    names_to = "grupo",
+    values_to = "frecuencia"
+  ) %>%
+  mutate(
+    grupo = recode(
+      grupo,
+      grupo_a = "Grupo A",
+      grupo_b = "Grupo B"
+    )
+  )
+
+ggplot(resistencia_larga, aes(x = intervalo_limpio, y = frecuencia, group = grupo)) +
+  geom_line(aes(linetype = grupo), linewidth = 1.1, color = "#243B53") +
+  geom_point(aes(shape = grupo), size = 3.4, color = "#627D98") +
+  labs(
+    title = "Tendencia de resistencia física por grupo",
+    x = "Intervalo",
+    y = "Frecuencia",
+    linetype = "Grupo",
+    shape = "Grupo"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+El Grupo B presenta una media mayor y un coeficiente de variación menor. Esto indica que obtiene mejor resistencia promedio y que sus datos son más homogéneos.
+
+# 6. Lesiones deportivas
+
+## Frecuencias
+
+```{r}
+lesiones_resumen <- registro_lesiones %>%
+  mutate(
+    total = sum(Cantidad_sesiones),
+    hi = Cantidad_sesiones / total,
+    porcentaje = 100 * hi,
+    Hi = Frecuencia_acumulada / total
+  )
+
+lesiones_resumen %>%
+  select(Cantidad_lesiones, Cantidad_sesiones, hi, porcentaje, Frecuencia_acumulada, Hi) %>%
+  mutate(
+    hi = round(hi, 3),
+    porcentaje = porc(porcentaje),
+    Hi = round(Hi, 3)
+  ) %>%
+  tabla_formateada(c("Lesiones", "fi", "hi", "%", "Fi", "Hi"))
+```
+
+## Media, mediana, moda y P37
+
+```{r}
+media_lesiones <- with(
+  lesiones_resumen,
+  sum(Cantidad_lesiones * Cantidad_sesiones) / sum(Cantidad_sesiones)
+)
+
+mediana_lesiones <- lesiones_resumen %>%
+  filter(Frecuencia_acumulada >= sum(Cantidad_sesiones) / 2) %>%
+  slice(1) %>%
+  pull(Cantidad_lesiones)
+
+moda_lesiones <- lesiones_resumen %>%
+  filter(Cantidad_sesiones == max(Cantidad_sesiones)) %>%
+  pull(Cantidad_lesiones)
+
+p37_lesiones <- lesiones_resumen %>%
+  filter(Frecuencia_acumulada >= 0.37 * sum(Cantidad_sesiones)) %>%
+  slice(1) %>%
+  pull(Cantidad_lesiones)
+
+tibble(
+  estadistico = c("Media", "Mediana", "Moda", "Percentil 37"),
+  valor = c(media_lesiones, mediana_lesiones, moda_lesiones, p37_lesiones)
+) %>%
+  mutate(valor = round(valor, 2)) %>%
+  tabla_formateada(c("Estadístico", "Valor"))
+```
+
+```{r}
+ggplot(lesiones_resumen, aes(x = factor(Cantidad_lesiones), y = Cantidad_sesiones)) +
+  geom_col(fill = "#BCCCDC", color = "#243B53", width = 0.68) +
+  geom_text(aes(label = Cantidad_sesiones), vjust = -0.35, size = 3.5) +
+  labs(
+    title = "Cantidad de sesiones según número de lesiones",
+    x = "Lesiones",
+    y = "Sesiones"
+  ) +
+  theme_light(base_size = 12)
+```
+
+La media supera a la mediana debido a la existencia de valores altos de lesiones. La moda se ubica en una lesión, que es el valor más frecuente.
+
+# 7. Duración de ejercicios aeróbicos
+
+## Intervalos
+
+```{r}
+cantidad_intervalos <- 6
+
+cortes_aerobicos <- seq(
+  min(duracion_aerobica$Duracion_minutos),
+  max(duracion_aerobica$Duracion_minutos),
+  length.out = cantidad_intervalos + 1
+)
+
+aerobicos_clasificados <- duracion_aerobica %>%
+  mutate(
+    intervalo = cut(
+      Duracion_minutos,
+      breaks = cortes_aerobicos,
+      include.lowest = TRUE,
+      right = FALSE
+    )
+  )
+
+tabla_aerobicos <- aerobicos_clasificados %>%
+  count(intervalo, name = "fi") %>%
+  mutate(
+    Li = cortes_aerobicos[-length(cortes_aerobicos)],
+    Ls = cortes_aerobicos[-1],
+    intervalo_texto = ifelse(
+      row_number() == n(),
+      paste0("[", round(Li, 2), ", ", round(Ls, 2), "]"),
+      paste0("[", round(Li, 2), ", ", round(Ls, 2), ")")
+    ),
+    hi = fi / sum(fi),
+    porcentaje = 100 * hi,
+    Fi = cumsum(fi),
+    Hi = cumsum(hi)
+  )
+
+tabla_aerobicos %>%
+  select(intervalo_texto, fi, hi, porcentaje, Fi, Hi) %>%
+  mutate(
+    hi = round(hi, 3),
+    porcentaje = porc(porcentaje),
+    Hi = round(Hi, 3)
+  ) %>%
+  tabla_formateada(c("Intervalo", "fi", "hi", "%", "Fi", "Hi"))
+```
+
+## Media y desviación
+
+```{r}
+media_aerobicos <- mean(duracion_aerobica$Duracion_minutos)
+desv_aerobicos <- sd(duracion_aerobica$Duracion_minutos)
+
+limite_bajo <- media_aerobicos - desv_aerobicos
+limite_alto <- media_aerobicos + desv_aerobicos
+
+pct_central <- duracion_aerobica %>%
+  summarise(
+    porcentaje = mean(
+      Duracion_minutos >= limite_bajo &
+        Duracion_minutos <= limite_alto
+    ) * 100
+  ) %>%
+  pull(porcentaje)
+
+tibble(
+  indicador = c("Media", "Desviación estándar", "Límite inferior", "Límite superior", "Porcentaje en el intervalo"),
+  valor = c(media_aerobicos, desv_aerobicos, limite_bajo, limite_alto, pct_central)
+) %>%
+  mutate(valor = round(valor, 3)) %>%
+  tabla_formateada(c("Indicador", "Valor"))
+```
+
+```{r}
+ggplot(aerobicos_clasificados, aes(x = Duracion_minutos)) +
+  geom_histogram(
+    breaks = cortes_aerobicos,
+    aes(y = after_stat(count / sum(count) * 100)),
+    fill = "#D9E2EC",
+    color = "#243B53"
+  ) +
+  geom_vline(xintercept = media_aerobicos, linewidth = 1, color = "#102A43") +
+  geom_vline(xintercept = c(limite_bajo, limite_alto), linetype = "dashed", color = "#D64545") +
+  labs(
+    title = "Duración aeróbica alrededor de la media",
+    x = "Duración en minutos",
+    y = "Porcentaje"
+  ) +
+  theme_classic(base_size = 12)
+```
+
+::: callout-note
+## Lectura
+
+La duración media es cercana a 2.375 minutos. Al tomar una desviación estándar por debajo y por encima de la media, el intervalo contiene aproximadamente el 65% de las observaciones.
+:::
+
+# Apoyo conceptual
+
+## Frecuencia relativa
+
+$$h_i=\frac{f_i}{n}$$
+
+## Media para datos agrupados
+
+$$\bar{x}=\frac{\sum f_iY_i}{n}$$
+
+## Coeficiente de variación
+
+$$CV=\frac{s}{\bar{x}}\times 100$$
+
+Un CV más bajo indica menor dispersión relativa y mayor homogeneidad.
+
+# Cierre
+
+El análisis permitió sintetizar información deportiva mediante tablas, gráficos y medidas descriptivas. Los resultados muestran diferencias importantes en horas de entrenamiento, resistencia física y concentración de datos. En general, las herramientas estadísticas permitieron describir mejor el comportamiento de las variables observadas.
